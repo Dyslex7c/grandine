@@ -1,0 +1,56 @@
+name: zkvm Test
+on: [push]
+jobs:
+  zkvm-test:
+    strategy:
+      matrix:
+        test_case: [
+          "consensus spec tests mainnet electra empty block transition",
+        ]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 2048
+        swap-size-mb: 1024
+    - name: Setup nim for constantine backend
+      uses: jiro4989/setup-nim-action@v2
+      with:
+        nim-version: '2.0.2'
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        parent-nim-install-directory: ${{ runner.temp }}
+    - name: Install dependencies for constantine backend
+      run: |
+        sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+          --no-install-recommends -yq \
+          libgmp-dev \
+          llvm
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+        lfs: true
+    - name: Install dependencies for ZKM
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y protobuf-compiler
+    - name: Cache ZKM toolchain
+      uses: actions/cache@v4
+      with:
+        path: ~/.zkm-toolchain
+        key: ${{ runner.os }}-zkm-toolchain-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-zkm-toolchain-
+    - name: Install ZKM toolchain
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    - name: Build zkvm guest
+      run: |
+        source ~/.zkm-toolchain/env
+        cd zkvm/guest/ziren
+        $HOME/.cargo/bin/cargo +nightly-2025-06-30 build --release --target mipsel-zkm-zkvm-elf
+    - name: Test zkvm-zkm
+      run: |
+        source ~/.zkm-toolchain/env
+        RUST_LOG=info cargo run -p zkvm_host --features ziren --release -- --test "${{ matrix.test_case }}" execute
