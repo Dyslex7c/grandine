@@ -10,28 +10,42 @@ jobs:
         ]
     runs-on: ubuntu-latest
     steps:
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 4096
-        swap-size-mb: 2048
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
-        remove-codeql: 'true'
-        remove-docker-images: 'true'
-    
-    - name: Clean up disk space
+    - name: Free up disk space
       run: |
-        echo "Available disk space before cleanup:"
+        echo "Disk space before cleanup:"
         df -h
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /usr/local/lib/android
         sudo rm -rf /opt/ghc
         sudo rm -rf /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
-        echo "Available disk space after cleanup:"
+        sudo rm -rf /usr/local/share/boost
+        sudo rm -rf /usr/share/swift
+        sudo rm -rf /usr/local/.ghcup
+        sudo rm -rf /usr/local/share/powershell
+        sudo rm -rf /usr/local/share/chromium
+        sudo rm -rf /usr/local/lib/node_modules
+        sudo docker system prune -a -f
+        sudo apt-get clean
+        sudo apt-get autoremove -y
+        echo "Disk space after cleanup:"
         df -h
+    
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 8192
+        swap-size-mb: 4096
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+        remove-docker-images: 'true'
+        build-mount-path: '/var/lib/docker/'
+    
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+        lfs: true
     
     - name: Setup nim for constantine backend
       uses: jiro4989/setup-nim-action@v2
@@ -47,25 +61,36 @@ jobs:
           libgmp-dev \
           llvm
     
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-        lfs: true
-    
     - name: Install dependencies for ZKM
       run: |
         sudo apt-get update
         sudo apt-get install -y protobuf-compiler
+    
+    - name: Check disk space
+      run: |
+        echo "Current disk usage:"
+        df -h
+        echo "Largest directories in /:"
+        sudo du -sh /* 2>/dev/null | sort -rh | head -20
+    
+    - name: Cache Cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
     
     - name: Cache ZKM toolchain
       id: cache-zkm
       uses: actions/cache@v4
       with:
         path: ~/.zkm-toolchain
-        key: ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-v2
         restore-keys: |
           ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-
-          ${{ runner.os }}-zkm-toolchain-
     
     - name: Install ZKM toolchain
       run: |
@@ -90,17 +115,31 @@ jobs:
         rustc --version
         echo "Checking cargo version:"
         cargo --version
-        echo "Verifying nightly-2025-06-30 toolchain:"
         if ! rustup toolchain list | grep -q "nightly-2025-06-30"; then
           echo "Installing nightly-2025-06-30 toolchain..."
           rustup toolchain install nightly-2025-06-30-x86_64-unknown-linux-gnu
         fi
+        rustup toolchain list
+    
+    - name: Clean up before build
+      run: |
+        # Clean cargo cache to free up space
+        if [ -d "$HOME/.cargo/registry" ]; then
+          echo "Cleaning cargo registry cache..."
+          cargo cache -a || true
+          rm -rf ~/.cargo/registry/src
+          rm -rf ~/.cargo/registry/cache
+        fi
+        echo "Disk space before build:"
+        df -h
     
     - name: Build zkvm guest
       run: |
         source ~/.zkm-toolchain/env
         cd zkvm/guest/ziren
         rustup run nightly-2025-06-30 cargo build --release --target mipsel-zkm-zkvm-elf
+        echo "Disk space after build:"
+        df -h
     
     - name: Test zkvm-zkm
       run: |
