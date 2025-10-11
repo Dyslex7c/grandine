@@ -90,7 +90,7 @@ jobs:
       run: |
         source ~/.zkm-toolchain/env
         cd zkvm/guest/ziren
-        cargo +nightly-2025-06-30 build --release --target mipsel-zkm-zkvm-elf
+        rustup run nightly-2025-06-30 cargo build --release --target mipsel-zkm-zkvm-elf
     
     - name: Test zkvm-zkm
       run: |
