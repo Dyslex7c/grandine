@@ -74,3 +74,39 @@ jobs:
     - name: Check consensus-spec-tests coverage (Linux)
       if: runner.os == 'Linux'
       run: scripts/ci/consensus-spec-tests-coverage.rb
+
+  zkvm-build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+        lfs: true
+    
+    - name: Cache ZKM toolchain
+      uses: actions/cache@v4
+      with:
+        path: ~/.zkm-toolchain
+        key: ${{ runner.os }}-zkm-toolchain-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-zkm-toolchain-
+    
+    - name: Install ZKM toolchain
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    
+    - name: Build zkvm guest
+      run: |
+        source ~/.zkm-toolchain/env
+        $HOME/.cargo/bin/cargo +nightly-2025-06-30 build --release --target mipsel-zkm-zkvm-elf
+    
+    - name: Run zkvm host test
+      run: |
+        source ~/.zkm-toolchain/env
+        cargo run -p zkvm_host --features ziren --release -- --test "consensus spec tests mainnet electra empty block transition" execute
