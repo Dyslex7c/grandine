@@ -104,6 +104,7 @@ jobs:
     - name: Build zkvm guest
       run: |
         source ~/.zkm-toolchain/env
+        cd zkvm/guest/ziren
         $HOME/.cargo/bin/cargo +nightly-2025-06-30 build --release --target mipsel-zkm-zkvm-elf
     
     - name: Run zkvm host test
