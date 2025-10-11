@@ -1,5 +1,6 @@
 name: zkvm Test
 on: [push]
+
 jobs:
   zkvm-test:
     strategy:
@@ -12,44 +13,85 @@ jobs:
     - name: Maximize build space
       uses: easimon/maximize-build-space@master
       with:
-        root-reserve-mb: 2048
-        swap-size-mb: 1024
+        root-reserve-mb: 4096
+        swap-size-mb: 2048
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+        remove-docker-images: 'true'
+    
+    - name: Clean up disk space
+      run: |
+        echo "Available disk space before cleanup:"
+        df -h
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
+        echo "Available disk space after cleanup:"
+        df -h
+    
     - name: Setup nim for constantine backend
       uses: jiro4989/setup-nim-action@v2
       with:
         nim-version: '2.0.2'
         repo-token: ${{ secrets.GITHUB_TOKEN }}
         parent-nim-install-directory: ${{ runner.temp }}
+    
     - name: Install dependencies for constantine backend
       run: |
         sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
           --no-install-recommends -yq \
           libgmp-dev \
           llvm
+    
     - uses: actions/checkout@v4
       with:
         submodules: true
         lfs: true
+    
     - name: Install dependencies for ZKM
       run: |
         sudo apt-get update
         sudo apt-get install -y protobuf-compiler
+    
     - name: Cache ZKM toolchain
+      id: cache-zkm
       uses: actions/cache@v4
       with:
         path: ~/.zkm-toolchain
-        key: ${{ runner.os }}-zkm-toolchain-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
+          ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-
           ${{ runner.os }}-zkm-toolchain-
+    
     - name: Install ZKM toolchain
+      if: steps.cache-zkm.outputs.cache-hit != 'true'
       run: |
+        echo "Disk space before ZKM installation:"
+        df -h
         curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
         echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        echo "Disk space after ZKM installation:"
+        df -h
+    
+    - name: Add cargo to PATH
+      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    
+    - name: Verify ZKM toolchain
+      run: |
+        source ~/.zkm-toolchain/env
+        rustc --version
+        cargo --version
+    
     - name: Build zkvm guest
       run: |
         source ~/.zkm-toolchain/env
         cd zkvm/guest/ziren
-        $HOME/.cargo/bin/cargo +nightly-2025-06-30 build --release --target mipsel-zkm-zkvm-elf
+        cargo +nightly-2025-06-30 build --release --target mipsel-zkm-zkvm-elf
+    
     - name: Test zkvm-zkm
       run: |
         source ~/.zkm-toolchain/env
