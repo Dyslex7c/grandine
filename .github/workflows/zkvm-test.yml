@@ -1,4 +1,4 @@
-name: zkvm Test
+name: zkvm Build Test
 on: [push]
 
 jobs:
@@ -6,142 +6,88 @@ jobs:
     strategy:
       matrix:
         test_case: [
+          # These two test cases can be completed in a reasonably short time
           "consensus spec tests mainnet electra empty block transition",
+          "pectra-devnet-6 without epoch transition"
         ]
     runs-on: ubuntu-latest
     steps:
-    - name: Free up disk space
-      run: |
-        echo "Disk space before cleanup:"
-        df -h
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /opt/hostedtoolcache/CodeQL
-        sudo rm -rf /usr/local/share/boost
-        sudo rm -rf /usr/share/swift
-        sudo rm -rf /usr/local/.ghcup
-        sudo rm -rf /usr/local/share/powershell
-        sudo rm -rf /usr/local/share/chromium
-        sudo rm -rf /usr/local/lib/node_modules
-        sudo docker system prune -a -f
-        sudo apt-get clean
-        sudo apt-get autoremove -y
-        echo "Disk space after cleanup:"
-        df -h
-    
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 8192
-        swap-size-mb: 4096
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
-        remove-codeql: 'true'
-        remove-docker-images: 'true'
-        build-mount-path: '/var/lib/docker/'
-    
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-        lfs: true
-    
-    - name: Setup nim for constantine backend
-      uses: jiro4989/setup-nim-action@v2
-      with:
-        nim-version: '2.0.2'
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-        parent-nim-install-directory: ${{ runner.temp }}
-    
-    - name: Install dependencies for constantine backend
-      run: |
-        sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
-          --no-install-recommends -yq \
-          libgmp-dev \
-          llvm
-    
-    - name: Install dependencies for ZKM
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y protobuf-compiler
-    
-    - name: Check disk space
-      run: |
-        echo "Current disk usage:"
-        df -h
-        echo "Largest directories in /:"
-        sudo du -sh /* 2>/dev/null | sort -rh | head -20
-    
-    - name: Cache Cargo registry
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-registry-
-    
-    - name: Cache ZKM toolchain
-      id: cache-zkm
-      uses: actions/cache@v4
-      with:
-        path: ~/.zkm-toolchain
-        key: ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-v2
-        restore-keys: |
-          ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-
-    
-    - name: Install ZKM toolchain
-      run: |
-        echo "Disk space before ZKM installation:"
-        df -h
-        if [ ! -d "$HOME/.zkm-toolchain" ] || [ ! -f "$HOME/.zkm-toolchain/env" ]; then
-          echo "Installing ZKM toolchain..."
-          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
-        else
-          echo "ZKM toolchain already installed (from cache)"
-        fi
-        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-        echo "Disk space after ZKM installation:"
-        df -h
-    
-    - name: Source ZKM environment and verify
-      run: |
-        source ~/.zkm-toolchain/env
-        echo "Checking rustup toolchains:"
-        rustup toolchain list
-        echo "Checking rustc version:"
-        rustc --version
-        echo "Checking cargo version:"
-        cargo --version
-        if ! rustup toolchain list | grep -q "nightly-2025-06-30"; then
-          echo "Installing nightly-2025-06-30 toolchain..."
-          rustup toolchain install nightly-2025-06-30-x86_64-unknown-linux-gnu
-        fi
-        rustup toolchain list
-    
-    - name: Clean up before build
-      run: |
-        # Clean cargo cache to free up space
-        if [ -d "$HOME/.cargo/registry" ]; then
-          echo "Cleaning cargo registry cache..."
-          cargo cache -a || true
-          rm -rf ~/.cargo/registry/src
-          rm -rf ~/.cargo/registry/cache
-        fi
-        echo "Disk space before build:"
-        df -h
-    
-    - name: Build zkvm guest
-      run: |
-        source ~/.zkm-toolchain/env
-        cd zkvm/guest/ziren
-        rustup run nightly-2025-06-30 cargo build --release --target mipsel-zkm-zkvm-elf
-        echo "Disk space after build:"
-        df -h
-    
-    - name: Test zkvm-zkm
-      run: |
-        source ~/.zkm-toolchain/env
-        RUST_LOG=info cargo run -p zkvm_host --features ziren --release -- --test "${{ matrix.test_case }}" execute
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          # leaving 20 GB for zkvm installations
+          root-reserve-mb: 20480
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+      
+      - name: Setup nim for constantine backend
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.2'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: ${{ runner.temp }}
+      
+      - name: Install dependencies for constantine backend
+        run: |
+          sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+            --no-install-recommends -yq \
+            libgmp-dev \
+            llvm
+      
+      - uses: actions/checkout@v4
+        with:
+          # check out submodule manually in next step
+          submodules: false
+          lfs: true
+      
+      - name: Check out necessary submodules only
+        run: |
+          git submodule update --init dedicated_executor eth2_libp2p
+      
+      - name: Install dependencies for ZKM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+      
+      - name: Cache ZKM toolchain
+        id: cache-zkm
+        uses: actions/cache@v4
+        with:
+          path: ~/.zkm-toolchain
+          key: ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-v2
+          restore-keys: |
+            ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-
+      
+      - name: Installing ZKM toolchain
+        run: |
+          if [ ! -d "$HOME/.zkm-toolchain" ] || [ ! -f "$HOME/.zkm-toolchain/env" ]; then
+            echo "Installing ZKM toolchain..."
+            curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
+          else
+            echo "ZKM toolchain already installed (from cache)"
+          fi
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Source ZKM environment and verify
+        run: |
+          source ~/.zkm-toolchain/env
+          echo "Checking rustup toolchains:"
+          rustup toolchain list
+          if ! rustup toolchain list | grep -q "nightly-2025-06-30"; then
+            echo "Installing nightly-2025-06-30 toolchain..."
+            rustup toolchain install nightly-2025-06-30-x86_64-unknown-linux-gnu
+          fi
+          rustc --version
+          cargo --version
+      
+      - name: Build zkvm guest
+        run: |
+          source ~/.zkm-toolchain/env
+          cd zkvm/guest/ziren
+          rustup run nightly-2025-06-30 cargo build --release --target mipsel-zkm-zkvm-elf
+      
+      - name: Running ZKM test
+        run: |
+          source ~/.zkm-toolchain/env
+          RUST_LOG=info cargo run -p zkvm_host --features ziren --release -- --test "${{ matrix.test_case }}" execute
